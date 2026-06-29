@@ -1,4 +1,4 @@
-const CACHE_NAME = "energy-checkin-v3";
+const CACHE_NAME = "energy-checkin-v4";
 const ASSETS = [
   "./",
   "./index.html",
@@ -32,7 +32,40 @@ self.addEventListener("message", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
-  event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request))
-  );
+
+  const requestUrl = new URL(event.request.url);
+  const isSameOrigin = requestUrl.origin === self.location.origin;
+  const isAppShell =
+    event.request.mode === "navigate" ||
+    (isSameOrigin && /\.(?:html|js|css|webmanifest)$/.test(requestUrl.pathname));
+
+  if (isAppShell) {
+    event.respondWith(networkFirst(event.request));
+    return;
+  }
+
+  event.respondWith(cacheFirst(event.request));
 });
+
+async function networkFirst(request) {
+  const cache = await caches.open(CACHE_NAME);
+  try {
+    const fresh = await fetch(request, { cache: "no-store" });
+    await cache.put(request, fresh.clone());
+    return fresh;
+  } catch {
+    const cached = await caches.match(request);
+    if (cached) return cached;
+    if (request.mode === "navigate") return caches.match("./index.html");
+    throw new Error("Network unavailable and no cache match");
+  }
+}
+
+async function cacheFirst(request) {
+  const cached = await caches.match(request);
+  if (cached) return cached;
+  const fresh = await fetch(request);
+  const cache = await caches.open(CACHE_NAME);
+  await cache.put(request, fresh.clone());
+  return fresh;
+}
