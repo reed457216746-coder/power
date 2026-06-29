@@ -1,5 +1,6 @@
 const STORAGE_KEY = "energy-checkin-v1";
 const BACKFILL_START_DATE = "2026-06-18";
+const BACKFILL_END_DATE = "2026-06-24";
 
 const encouragements = [
   "把能量留给真正想成为的自己。",
@@ -93,7 +94,8 @@ const el = {
   totalDays: document.querySelector("#totalDays"),
   encouragement: document.querySelector("#encouragement"),
   weekRow: document.querySelector("#weekRow"),
-  resetToday: document.querySelector("#resetToday"),
+  viewRecords: document.querySelector("#viewRecords"),
+  weekOpen: document.querySelector("#weekOpen"),
   averageMinutes: document.querySelector("#averageMinutes"),
   exportBackup: document.querySelector("#exportBackup"),
   importBackup: document.querySelector("#importBackup"),
@@ -109,6 +111,7 @@ const el = {
 
 let timerId = null;
 let rescueSeconds = 180;
+let renderedDateKey = "";
 
 init();
 
@@ -135,13 +138,6 @@ function bindEvents() {
     }
   });
 
-  el.resetToday.addEventListener("click", () => {
-    const today = dateKey(new Date());
-    state.checkIns = state.checkIns.filter((day) => day !== today);
-    saveState();
-    render();
-  });
-
   el.averageMinutes.addEventListener("change", () => {
     const value = Number(el.averageMinutes.value);
     state.averageMinutes = Math.min(240, Math.max(10, Number.isFinite(value) ? value : 60));
@@ -159,16 +155,27 @@ function bindEvents() {
   el.exportBackup.addEventListener("click", exportBackup);
   el.importBackup.addEventListener("click", () => el.backupFile.click());
   el.backupFile.addEventListener("change", importBackup);
+  el.viewRecords.addEventListener("click", showRecordsSheet);
+  el.weekOpen.addEventListener("click", showRecordsSheet);
   el.urgeButton.addEventListener("click", showRescueSheet);
   el.actionButton.addEventListener("click", showActionsSheet);
   el.noteButton.addEventListener("click", showNotesSheet);
   el.sheet.addEventListener("click", (event) => {
     if (event.target.closest("[data-close-sheet]")) closeSheet();
   });
+
+  window.addEventListener("focus", refreshForCurrentDay);
+  window.addEventListener("pageshow", refreshForCurrentDay);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) refreshForCurrentDay();
+  });
+  setInterval(refreshForCurrentDay, 60 * 1000);
 }
 
 function render() {
   const today = dateKey(new Date());
+  renderedDateKey = today;
+  el.todayLabel.textContent = formatToday();
   state.checkIns = [...new Set(state.checkIns)].sort();
   state.todayChecked = state.checkIns.includes(today);
 
@@ -291,6 +298,51 @@ function showNotesSheet() {
   });
 }
 
+function showRecordsSheet() {
+  const calendar = getRecordCalendarDays();
+  const recent = [...state.checkIns].sort().reverse();
+  openSheet("签到记录", `
+    <div class="records-summary">
+      <article>
+        <span>累计签到</span>
+        <strong>${state.checkIns.length} 天</strong>
+      </article>
+      <article>
+        <span>连续坚持</span>
+        <strong>${calculateStreak(state.checkIns)} 天</strong>
+      </article>
+    </div>
+    <div class="record-calendar" aria-label="签到日历">
+      ${calendar.map((day) => `
+        <span class="${day.checked ? "done" : ""} ${day.isToday ? "today" : ""}">
+          <small>${day.weekday}</small>
+          <strong>${day.day}</strong>
+        </span>
+      `).join("")}
+    </div>
+    <div class="record-history">
+      <h3>全部签到日期</h3>
+      ${
+        recent.length
+          ? `<ul>${recent.map((day) => `<li>${formatRecordDate(day)}</li>`).join("")}</ul>`
+          : `<p>还没有签到记录。</p>`
+      }
+    </div>
+    <div class="sheet-actions">
+      <button class="secondary" type="button" id="undoTodayInSheet">撤销今天</button>
+      <button type="button" data-close-sheet>关闭</button>
+    </div>
+  `);
+
+  document.querySelector("#undoTodayInSheet").addEventListener("click", () => {
+    const today = dateKey(new Date());
+    state.checkIns = state.checkIns.filter((day) => day !== today);
+    saveState();
+    render();
+    showRecordsSheet();
+  });
+}
+
 function openSheet(title, content) {
   clearInterval(timerId);
   el.sheetTitle.textContent = title;
@@ -410,11 +462,11 @@ function backfillInitialCheckIns() {
   if (state.seededFromDate === BACKFILL_START_DATE) return;
 
   const start = parseDateKey(BACKFILL_START_DATE);
-  const today = new Date();
+  const end = parseDateKey(BACKFILL_END_DATE);
   const dates = [];
   const cursor = new Date(start);
 
-  while (cursor <= today) {
+  while (cursor <= end) {
     dates.push(dateKey(cursor));
     cursor.setDate(cursor.getDate() + 1);
   }
@@ -477,6 +529,12 @@ function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
+function refreshForCurrentDay() {
+  if (dateKey(new Date()) !== renderedDateKey) {
+    render();
+  }
+}
+
 function isDateKey(value) {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
@@ -491,6 +549,39 @@ function dateKey(date) {
 function parseDateKey(key) {
   const [year, month, day] = key.split("-").map(Number);
   return new Date(year, month - 1, day);
+}
+
+function getRecordCalendarDays() {
+  const checked = new Set(state.checkIns);
+  const start = state.checkIns.length ? parseDateKey(state.checkIns[0]) : new Date();
+  const today = new Date();
+  const days = [];
+  const cursor = new Date(start);
+  const labels = ["日", "一", "二", "三", "四", "五", "六"];
+
+  while (cursor <= today) {
+    const key = dateKey(cursor);
+    days.push({
+      key,
+      day: cursor.getDate(),
+      weekday: labels[cursor.getDay()],
+      checked: checked.has(key),
+      isToday: key === dateKey(today)
+    });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return days;
+}
+
+function formatRecordDate(key) {
+  const date = parseDateKey(key);
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    weekday: "short"
+  }).format(date);
 }
 
 function formatToday() {
@@ -562,6 +653,20 @@ function escapeHtml(value) {
 
 function registerServiceWorker() {
   if ("serviceWorker" in navigator && location.protocol !== "file:") {
-    navigator.serviceWorker.register("./service-worker.js").catch(() => {});
+    navigator.serviceWorker.register("./service-worker.js").then((registration) => {
+      registration.update().catch(() => {});
+      if (registration.waiting) {
+        registration.waiting.postMessage({ type: "SKIP_WAITING" });
+      }
+      registration.addEventListener("updatefound", () => {
+        const worker = registration.installing;
+        if (!worker) return;
+        worker.addEventListener("statechange", () => {
+          if (worker.state === "installed" && navigator.serviceWorker.controller) {
+            worker.postMessage({ type: "SKIP_WAITING" });
+          }
+        });
+      });
+    }).catch(() => {});
   }
 }
