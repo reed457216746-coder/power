@@ -152,11 +152,11 @@ function bindEvents() {
     render();
   });
 
-  el.exportBackup.addEventListener("click", exportBackup);
-  el.importBackup.addEventListener("click", () => el.backupFile.click());
-  el.backupFile.addEventListener("change", importBackup);
-  el.viewRecords.addEventListener("click", showRecordsSheet);
-  el.weekOpen.addEventListener("click", showRecordsSheet);
+  el.exportBackup?.addEventListener("click", exportBackup);
+  el.importBackup?.addEventListener("click", () => el.backupFile?.click());
+  el.backupFile?.addEventListener("change", importBackup);
+  el.viewRecords?.addEventListener("click", showRecordsSheet);
+  el.weekOpen?.addEventListener("click", showRecordsSheet);
   el.urgeButton.addEventListener("click", showRescueSheet);
   el.actionButton.addEventListener("click", showActionsSheet);
   el.noteButton.addEventListener("click", showNotesSheet);
@@ -653,7 +653,7 @@ function escapeHtml(value) {
 
 function registerServiceWorker() {
   if ("serviceWorker" in navigator && location.protocol !== "file:") {
-    navigator.serviceWorker.register("./service-worker.js").then((registration) => {
+    navigator.serviceWorker.register("./service-worker.js?v=20260629-2").then((registration) => {
       registration.update().catch(() => {});
       if (registration.waiting) {
         registration.waiting.postMessage({ type: "SKIP_WAITING" });
